@@ -1,27 +1,32 @@
 package com.acabra.ratelimiter.core;
 
-import com.acabra.ratelimiter.config.RLConfig;
+import com.acabra.ratelimiter.main.RLConfig;
+import com.acabra.ratelimiter.main.RateLimiter;
 import com.acabra.ratelimiter.model.Hit;
+import lombok.extern.slf4j.Slf4j;
 
-import java.util.ArrayDeque;
-import java.util.Enumeration;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-public class Limiter {
+@Slf4j
+public class Limiter implements RateLimiter {
 
     private final RLConfig config;
     private final ConcurrentHashMap<String, LimitedEntry> table = new ConcurrentHashMap<>();
     private final LongAdder limited = new LongAdder();
+    private final Set<String> allowList;
 
     public Limiter(RLConfig config) {
         this.config = config;
+        this.allowList = Set.copyOf(config.allowedEntries);
     }
 
+    @Override
     public boolean shouldLimit(String key, long now) {
+        if(allowList.contains(key)) return false;
         Hit hit = Hit.ofNow(now);
         LimitedEntry limitedEntry = table.compute(key,
                 (k, v) -> {
@@ -30,47 +35,51 @@ public class Limiter {
                     }
                     return v.accept(hit);
                 });
-        boolean shouldLimit = limitedEntry.shouldLimit();
-        if(shouldLimit) {
+        if(limitedEntry.shouldLimit()) {
             limited.increment();
             return true;
         }
         return false;
     }
 
+    @Override
     public boolean shouldLimit(String key) {
         return shouldLimit(key, System.currentTimeMillis());
     }
 
+    @Override
     public long totalLimited() {
         return limited.sum();
     }
 
-    synchronized public List<String> getLimitedKeys() {
+    @Override
+    synchronized public List<String> keysUnderMonitoring() {
         Enumeration<String> keys = table.keys();
         return IntStream.range(0,table.size()).mapToObj(i -> keys.nextElement())
                 .collect(Collectors.toList());
     }
 
+    @Override
     public long limitCount(String key) {
         return table.get(key).getLimitCount();
     }
 
     private class LimitedEntry {
         private final ArrayDeque<Hit> queue;
-        private LongAdder limitCount = new LongAdder();
+        private final LongAdder limitCount;
 
-        public LimitedEntry(Hit hit) {
+        private LimitedEntry(Hit hit) {
+            this.limitCount = new LongAdder();
             this.queue = new ArrayDeque<>(){{
                 add(hit);
             }};
         }
 
-        public long getLimitCount() {
+        private long getLimitCount() {
             return limitCount.sum();
         }
 
-        public boolean shouldLimit() {
+        private boolean shouldLimit() {
             return queue.size() > config.maxHits;
         }
 
@@ -80,7 +89,7 @@ public class Limiter {
             }
         }
 
-        public LimitedEntry accept(Hit hit) {
+        private LimitedEntry accept(Hit hit) {
             cleanExpiredEntries(hit.timestamp);
             queue.addFirst(hit);
             if(shouldLimit()) {

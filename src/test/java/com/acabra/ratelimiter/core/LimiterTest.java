@@ -1,9 +1,8 @@
 package com.acabra.ratelimiter.core;
 
-import com.acabra.ratelimiter.config.RLConfig;
+import com.acabra.ratelimiter.main.RLConfig;
 import com.acabra.ratelimiter.utils.KeyGenerator;
 import org.assertj.core.api.Assertions;
-import org.assertj.core.data.Offset;
 import org.assertj.core.data.Percentage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,7 +15,10 @@ import java.util.stream.IntStream;
 
 class LimiterTest {
 
-    private final RLConfig config = new RLConfig(1000L, 10);
+    private final RLConfig config = RLConfig.builder()
+            .withWindowSizeMillis(1000L)
+            .withMaxHits(10)
+            .build();
     private Limiter underTest;
 
     @BeforeEach
@@ -47,8 +49,8 @@ class LimiterTest {
         System.out.println("total limited actual: " + actual);
         Assertions.assertThat(actual).isCloseTo(1900L, Percentage.withPercentage(5));
 
-        List<String> limitedKeys = underTest.getLimitedKeys();
-        double expected = Double.valueOf(actual) / limitedKeys.size();
+        List<String> limitedKeys = underTest.keysUnderMonitoring();
+        double expected = ((double) actual) / limitedKeys.size();
         System.out.println("total expected: " + expected);
         for (String key : limitedKeys) {
             long keyLimitCount = underTest.limitCount(key);
